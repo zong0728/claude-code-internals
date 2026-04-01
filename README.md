@@ -1,18 +1,18 @@
 # Claude Code Internals
 
+**[English](README.md)** | **[中文](README_zh.md)**
+
 Deep dive into Claude Code's architecture based on the [leaked source code](https://github.com/anthropics/claude-code) — tools system, query engine, IDE bridge, hidden features & more.
 
-基于泄露源码的 Claude Code 架构深度拆解 — 工具系统、Query Engine、IDE 桥接、隐藏功能分析。
-
-## Background / 背景
+## Background
 
 On March 31, 2026, [Chaofan Shou discovered](https://x.com/shoucccc) that Anthropic's Claude Code CLI had its full source code exposed via source maps bundled in the npm package. The source maps — normally a development-only debugging aid — were accidentally included in the production build, allowing anyone to reconstruct the original TypeScript source (~1,900 files, ~513,000 lines of code).
 
 This repo contains **only my own analysis and documentation** — no leaked source code is included.
 
-## Contents / 目录
+## Contents
 
-### Analysis / 分析文档
+### Analysis
 
 | File | Description |
 |------|-------------|
@@ -20,7 +20,7 @@ This repo contains **only my own analysis and documentation** — no leaked sour
 | [`analysis/hidden-features.md`](analysis/hidden-features.md) | Hidden features: BUDDY (deterministic companion) & KAIROS (proactive messaging) |
 | [`analysis/extra-modules.md`](analysis/extra-modules.md) | Supplementary modules: coordinator, tasks, memdir, moreright, etc. |
 
-### Diagrams / 架构图 (Mermaid)
+### Diagrams (Mermaid)
 
 | File | Description |
 |------|-------------|
@@ -28,14 +28,14 @@ This repo contains **only my own analysis and documentation** — no leaked sour
 | [`diagrams/query-engine-flow.mmd`](diagrams/query-engine-flow.mmd) | Query engine sequence diagram — agentic turn loop |
 | [`diagrams/ide-bridge.mmd`](diagrams/ide-bridge.mmd) | IDE bridge protocol — v1/v2, reconnection, crash recovery |
 
-### Articles / 文章
+### Articles
 
 | File | Description |
 |------|-------------|
 | [`docs/article-en.md`](docs/article-en.md) | English article (~1,800 words) — for GitHub / dev.to |
-| [`docs/article-zh.md`](docs/article-zh.md) | 中文文章（~2,300 字）— 面向掘金 / 知乎读者 |
+| [`docs/article-zh.md`](docs/article-zh.md) | Chinese article (~2,300 words) — for Juejin / Zhihu |
 
-## Key Findings / 关键发现
+## Key Findings
 
 - **39 tools** with a multi-layer permission system (AST-parsed commands, dynamic permission computation, auto-classifier)
 - **Query engine** with 7+ error recovery paths, streaming tool execution, and 4 context compaction strategies
