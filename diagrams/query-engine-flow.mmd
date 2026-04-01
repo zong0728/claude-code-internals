@@ -1,0 +1,163 @@
+%% Claude Code Query Engine — Complete Call Chain
+%% Source: /QueryEngine.ts, /query.ts, /query/, /services/api/claude.ts, /services/tools/
+
+sequenceDiagram
+    autonumber
+    participant U as User / IDE
+    participant QE as QueryEngine<br/>(QueryEngine.ts)
+    participant QL as queryLoop<br/>(query.ts)
+    participant CTX as Context Manager<br/>(microcompact / autocompact /<br/>context-collapse)
+    participant API as Claude API<br/>(services/api/claude.ts)
+    participant STE as StreamingToolExecutor<br/>(StreamingToolExecutor.ts)
+    participant TO as Tool Orchestration<br/>(toolOrchestration.ts)
+    participant T as Tool<br/>(tools/*)
+    participant HOOK as Stop Hooks<br/>(stopHooks.ts)
+    participant MEM as Memory / Skills<br/>(attachments)
+
+    %% === PHASE 1: Entry ===
+    U->>+QE: submitMessage(prompt)
+    QE->>QE: Fetch system prompt parts<br/>(tools, models, context)
+    QE->>QE: Process slash commands & permissions
+    QE->>QE: Build systemPrompt<br/>(default + memory + appended)
+    QE-->>U: yield SystemInitMessage
+
+    %% === PHASE 2: Query Loop ===
+    QE->>+QL: query(params) → queryLoop()
+
+    loop while(true) — agentic turn loop
+        Note over QL: ── TURN START ──
+
+        %% === PHASE 3: Pre-API Processing ===
+        QL->>+CTX: Pre-API context management
+        CTX->>CTX: microcompactMessages()
+        CTX->>CTX: autoCompactIfNeeded()
+        CTX->>CTX: context-collapse (if enabled)
+        CTX->>CTX: Apply tool result budget
+        CTX-->>-QL: Processed messages + token state
+
+        QL->>QL: Check token warning / blocking limit
+        alt Token limit blocking
+            QL-->>U: yield error SystemMessage
+            QL-->>QE: return { reason: 'prompt_too_long' }
+        end
+
+        %% === PHASE 4: LLM API Call (Streaming) ===
+        QL->>QL: Create StreamingToolExecutor<br/>(if streaming execution enabled)
+        QL->>+API: callModel() → queryModelWithStreaming()
+        Note over API: withRetry() + withStreamingVCR()
+
+        loop for each streaming event
+            API-->>QL: StreamEvent (text_delta / tool_use_block)
+            QL-->>U: yield StreamEvent (tokens)
+
+            alt tool_use block detected
+                QL->>QL: Extract tool_use block
+                QL->>STE: addTool(toolUseBlock)
+                STE->>STE: Queue for concurrent execution
+            end
+
+            alt FallbackTriggeredError
+                API-->>QL: Fallback signal
+                QL->>QL: Discard partial results
+                QL->>QL: Tombstone orphaned messages
+                QL->>API: Retry with fallback model
+            end
+        end
+        API-->>-QL: Stream complete (AssistantMessage)
+
+        %% === PHASE 5: Streaming Tool Results ===
+        opt Streaming tool execution enabled
+            loop getCompletedResults()
+                STE->>+T: Execute tool (concurrent if safe)
+                T->>T: validateInput() → checkPermissions() → call()
+                T-->>-STE: ToolResult
+                STE-->>QL: yield completed tool result
+                QL-->>U: yield UserMessage (tool_result)
+            end
+        end
+
+        %% === PHASE 6: Post-API Decision ===
+        alt No tools called (needsFollowUp = false)
+            Note over QL: ── CHECK EXIT CONDITIONS ──
+
+            alt Prompt too long (413)
+                QL->>CTX: context-collapse drain (cheap)
+                alt Recovery succeeded
+                    QL->>QL: continue loop
+                else Try reactive compact
+                    QL->>CTX: reactiveCompact (full summary)
+                    alt Recovery succeeded
+                        QL->>QL: continue loop
+                    else Failed
+                        QL-->>U: yield error
+                        QL-->>QE: return { reason: 'prompt_too_long' }
+                    end
+                end
+            end
+
+            alt Max output tokens
+                alt First attempt
+                    QL->>QL: Escalate to 64K tokens
+                    QL->>QL: continue loop
+                else Retry ≤ 3
+                    QL->>QL: Append recovery message
+                    QL->>QL: continue loop
+                else Exhausted
+                    QL-->>U: yield error
+                end
+            end
+
+            QL->>+HOOK: handleStopHooks()
+            HOOK->>HOOK: Classify job templates
+            HOOK->>HOOK: Extract memories
+            HOOK->>HOOK: Evaluate stop conditions
+            HOOK-->>-QL: Continue / Block / Exit
+
+            alt Stop hooks → exit
+                QL-->>QE: return { reason: 'completed' }
+            end
+
+        else Tools were called (needsFollowUp = true)
+            Note over QL: ── TOOL EXECUTION ──
+
+            %% === PHASE 7: Batch Tool Execution ===
+            opt Non-streaming tools remain
+                QL->>+TO: runTools(toolUseBlocks)
+                TO->>TO: Partition: concurrent vs serial
+
+                par Concurrent batch (read-only tools)
+                    TO->>+T: Execute tools in parallel
+                    T-->>-TO: ToolResults[]
+                end
+
+                loop Serial batch (write tools)
+                    TO->>+T: Execute tool
+                    T->>T: Parse input → checkPermissions() → call()
+                    T-->>-TO: ToolResult
+                    TO-->>QL: yield UserMessage (tool_result)
+                end
+                TO-->>-QL: All tool results
+            end
+
+            %% === PHASE 8: Attachment Gathering ===
+            QL->>+MEM: getAttachmentMessages()
+            MEM->>MEM: Consume memory prefetch
+            MEM->>MEM: Collect skill discovery
+            MEM->>MEM: Drain command queue
+            MEM-->>-QL: AttachmentMessages[]
+            QL-->>U: yield AttachmentMessages
+
+            QL->>QL: refreshTools() (pick up new MCP servers)
+
+            alt maxTurns reached
+                QL-->>QE: return { reason: 'max_turns' }
+            end
+
+            Note over QL: ── BUILD NEXT STATE ──
+            QL->>QL: state = { messages + toolResults,<br/>turnCount++, tracking }
+        end
+    end
+
+    QL-->>-QE: Terminal result
+    QE->>QE: Record transcript & usage
+    QE-->>-U: Final result

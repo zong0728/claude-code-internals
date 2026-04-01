@@ -1,0 +1,211 @@
+%% Claude Code — High-Level Architecture Overview
+%% Source: Full codebase scan of /Users/zong/claude-code/
+
+graph TB
+    %% ===== ENTRY POINTS =====
+    subgraph Entry["Entry Points"]
+        MAIN["main.tsx"]
+        CLI_ENTRY["entrypoints/cli.tsx<br/>CLI bootstrap"]
+        INIT["entrypoints/init.ts<br/>Config, auth, telemetry"]
+    end
+
+    %% ===== UI LAYER =====
+    subgraph UI["Terminal UI Layer"]
+        INK["ink/<br/>React terminal renderer<br/>(Yoga layout, ANSI)"]
+        COMPONENTS["components/<br/>146+ React components<br/>(App, REPL, dialogs)"]
+        SCREENS["screens/<br/>REPL.tsx (895KB)<br/>Doctor, ResumeConversation"]
+    end
+
+    %% ===== INPUT LAYER =====
+    subgraph Input["Input & Interaction"]
+        HOOKS["hooks/<br/>85+ React hooks"]
+        KEYBINDINGS["keybindings/<br/>Key config"]
+        VOICE["voice/<br/>Voice-to-text"]
+        COMMANDS["commands/<br/>100+ slash commands"]
+    end
+
+    %% ===== STATE LAYER =====
+    subgraph State["State & Context"]
+        APP_STATE["state/AppState.tsx<br/>React context + external store"]
+        CONTEXT["context/<br/>Notifications, stats,<br/>voice, modals"]
+        BOOTSTRAP["bootstrap/state.ts<br/>Global runtime state<br/>(session, tokens, OTel)"]
+    end
+
+    %% ===== CORE ENGINE =====
+    subgraph Core["Core Query Engine"]
+        QUERY_ENGINE["QueryEngine.ts<br/>submitMessage() orchestrator"]
+        QUERY["query.ts<br/>queryLoop() — agentic turn loop<br/>streaming, error recovery"]
+        TOOL_INTERFACE["Tool.ts<br/>Tool interface + buildTool()"]
+    end
+
+    %% ===== TOOL SYSTEM =====
+    subgraph Tools["Tool System (39 tools)"]
+        direction TB
+        FILE_TOOLS["File Tools<br/>Read, Edit, Write,<br/>Glob, Grep, NotebookEdit"]
+        EXEC_TOOLS["Execution Tools<br/>Bash, PowerShell, LSP"]
+        AGENT_TOOLS["Agent Tools<br/>Agent, SendMessage,<br/>TeamCreate, TeamDelete"]
+        TASK_TOOLS["Task Tools<br/>TaskCreate/Get/List/<br/>Update/Stop/Output"]
+        WEB_TOOLS["Web Tools<br/>WebFetch, WebSearch"]
+        MCP_TOOLS["MCP Tools<br/>MCPTool, McpAuth,<br/>ListMcpResources"]
+        MODE_TOOLS["Mode Tools<br/>EnterPlanMode,<br/>EnterWorktree, Config"]
+        SKILL_TOOL["SkillTool<br/>Invoke slash-command skills"]
+    end
+
+    %% ===== SERVICES =====
+    subgraph Services["Services Layer"]
+        API_SERVICE["services/api/<br/>Claude API client,<br/>withRetry, streaming"]
+        COMPACT["services/compact/<br/>autoCompact, reactiveCompact,<br/>microcompact"]
+        ANALYTICS["services/analytics/<br/>GrowthBook feature gates,<br/>event logging"]
+        OAUTH["services/oauth/<br/>Token management,<br/>refresh flows"]
+        MCP_SERVICE["services/mcp/<br/>MCP server registry,<br/>client pool, lifecycle"]
+        LSP_SERVICE["services/LSP/<br/>Language Server Protocol"]
+        TOOL_ORCH["services/tools/<br/>toolOrchestration.ts<br/>StreamingToolExecutor"]
+        SKILL_SEARCH["services/skillSearch/<br/>Skill discovery"]
+        COMPACT_COLLAPSE["services/contextCollapse/<br/>Context window optimization"]
+    end
+
+    %% ===== BRIDGE & REMOTE =====
+    subgraph Bridge["IDE Bridge & Remote"]
+        BRIDGE["bridge/<br/>replBridge.ts (100KB)<br/>bridgeMain.ts (115KB)"]
+        BRIDGE_MSG["bridge/bridgeMessaging.ts<br/>Protocol encoding"]
+        BRIDGE_API["bridge/bridgeApi.ts<br/>HTTP client"]
+        REMOTE["remote/<br/>RemoteSessionManager<br/>WebSocket transport"]
+        SERVER["server/<br/>directConnectManager"]
+    end
+
+    %% ===== EXTENSIBILITY =====
+    subgraph Extend["Extensibility"]
+        PLUGINS["plugins/<br/>Plugin system,<br/>bundled plugins"]
+        SKILLS["skills/<br/>Skill registry,<br/>bundled + user skills"]
+        MEMDIR["memdir/<br/>Session memory,<br/>findRelevantMemories"]
+    end
+
+    %% ===== TASK SYSTEM =====
+    subgraph TaskSys["Background Tasks"]
+        TASKS["tasks/<br/>Task execution framework"]
+        LOCAL_AGENT["LocalAgentTask<br/>Subagent spawning"]
+        LOCAL_SHELL["LocalShellTask<br/>Script execution"]
+        REMOTE_AGENT["RemoteAgentTask<br/>CCR execution"]
+        DREAM["DreamTask<br/>Auto-planning"]
+    end
+
+    %% ===== COORDINATOR =====
+    COORDINATOR["coordinator/<br/>coordinatorMode.ts<br/>Multi-agent coordination"]
+
+    %% ===== FOUNDATION =====
+    subgraph Foundation["Foundation"]
+        UTILS["utils/ (331+ files)<br/>Config, settings, auth, git,<br/>permissions, messages, logging"]
+        SCHEMAS["schemas/ + types/<br/>Zod schemas, message types,<br/>ID types, hook types"]
+        CONSTANTS["constants/<br/>Prompts, OAuth, tools, XML"]
+    end
+
+    %% ===== EXTERNAL =====
+    CLAUDE_API(["Claude API<br/>(Anthropic)"])
+    IDE(["IDE Extensions<br/>(VS Code / JetBrains)"])
+    MCP_SERVERS(["MCP Servers<br/>(external)"])
+    WEB(["Web / Browser"])
+
+    %% ===== CONNECTIONS =====
+
+    %% Entry flow
+    MAIN --> CLI_ENTRY --> INIT
+    INIT --> BOOTSTRAP
+    INIT --> UTILS
+
+    %% UI rendering
+    CLI_ENTRY --> INK
+    INK --> COMPONENTS
+    COMPONENTS --> SCREENS
+
+    %% UI → State
+    COMPONENTS --> APP_STATE
+    COMPONENTS --> CONTEXT
+    SCREENS --> HOOKS
+
+    %% Input processing
+    HOOKS --> APP_STATE
+    HOOKS --> COMMANDS
+    HOOKS --> VOICE
+    HOOKS --> KEYBINDINGS
+
+    %% Core engine flow
+    HOOKS -->|"useReplBridge"| QUERY_ENGINE
+    QUERY_ENGINE --> QUERY
+    QUERY --> TOOL_INTERFACE
+    QUERY --> TOOL_ORCH
+    QUERY --> COMPACT
+    QUERY --> COMPACT_COLLAPSE
+
+    %% Tool system
+    TOOL_INTERFACE --> FILE_TOOLS
+    TOOL_INTERFACE --> EXEC_TOOLS
+    TOOL_INTERFACE --> AGENT_TOOLS
+    TOOL_INTERFACE --> TASK_TOOLS
+    TOOL_INTERFACE --> WEB_TOOLS
+    TOOL_INTERFACE --> MCP_TOOLS
+    TOOL_INTERFACE --> MODE_TOOLS
+    TOOL_INTERFACE --> SKILL_TOOL
+
+    %% Services
+    QUERY --> API_SERVICE
+    API_SERVICE --> CLAUDE_API
+    API_SERVICE --> OAUTH
+    ANALYTICS -.->|"feature gates"| TOOLS
+    MCP_TOOLS --> MCP_SERVICE
+    MCP_SERVICE --> MCP_SERVERS
+    EXEC_TOOLS --> LSP_SERVICE
+    SKILL_TOOL --> SKILLS
+    SKILL_TOOL --> SKILL_SEARCH
+
+    %% Bridge & Remote
+    HOOKS -->|"useReplBridge"| BRIDGE
+    BRIDGE --> BRIDGE_MSG
+    BRIDGE --> BRIDGE_API
+    BRIDGE --> IDE
+    REMOTE --> WEB
+    SERVER --> REMOTE
+
+    %% Tasks
+    AGENT_TOOLS --> TASKS
+    TASKS --> LOCAL_AGENT
+    TASKS --> LOCAL_SHELL
+    TASKS --> REMOTE_AGENT
+    TASKS --> DREAM
+    LOCAL_AGENT --> QUERY
+    COORDINATOR --> TASKS
+
+    %% Extensibility
+    PLUGINS --> COMMANDS
+    SKILLS --> PLUGINS
+    QUERY -->|"attachments"| MEMDIR
+
+    %% Foundation (used by all)
+    UTILS -.-> Core
+    UTILS -.-> Services
+    UTILS -.-> Tools
+    SCHEMAS -.-> Core
+    BOOTSTRAP -.-> Core
+    CONSTANTS -.-> Core
+
+    %% Styling
+    classDef entry fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    classDef ui fill:#7b68ee,stroke:#5a4cb0,color:#fff
+    classDef state fill:#e6a23c,stroke:#b8860b,color:#fff
+    classDef core fill:#f56c6c,stroke:#c04040,color:#fff
+    classDef tools fill:#67c23a,stroke:#4a8f2a,color:#fff
+    classDef services fill:#409eff,stroke:#2d7bd6,color:#fff
+    classDef bridge fill:#e040fb,stroke:#a020c0,color:#fff
+    classDef extend fill:#ff9800,stroke:#cc7a00,color:#fff
+    classDef foundation fill:#909399,stroke:#6d7075,color:#fff
+    classDef external fill:#303133,stroke:#1a1a1a,color:#fff
+
+    class MAIN,CLI_ENTRY,INIT entry
+    class INK,COMPONENTS,SCREENS ui
+    class APP_STATE,CONTEXT,BOOTSTRAP state
+    class QUERY_ENGINE,QUERY,TOOL_INTERFACE core
+    class FILE_TOOLS,EXEC_TOOLS,AGENT_TOOLS,TASK_TOOLS,WEB_TOOLS,MCP_TOOLS,MODE_TOOLS,SKILL_TOOL tools
+    class API_SERVICE,COMPACT,ANALYTICS,OAUTH,MCP_SERVICE,LSP_SERVICE,TOOL_ORCH,SKILL_SEARCH,COMPACT_COLLAPSE services
+    class BRIDGE,BRIDGE_MSG,BRIDGE_API,REMOTE,SERVER bridge
+    class PLUGINS,SKILLS,MEMDIR extend
+    class UTILS,SCHEMAS,CONSTANTS foundation
+    class CLAUDE_API,IDE,MCP_SERVERS,WEB external

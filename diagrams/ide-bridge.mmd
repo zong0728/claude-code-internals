@@ -1,0 +1,134 @@
+%% Claude Code IDE Bridge — Bidirectional Communication Architecture
+%% Source: /bridge/replBridge.ts, bridgeMain.ts, bridgeMessaging.ts, bridgeApi.ts
+
+sequenceDiagram
+    autonumber
+    participant IDE as IDE Extension<br/>(VS Code / JetBrains)
+    participant WEB as Claude.ai Web UI
+    participant SRV as Session-Ingress Server<br/>(Anthropic)
+    participant BRIDGE as Bridge Core<br/>(replBridge.ts + bridgeMain.ts)
+    participant REPL as REPL / QueryEngine<br/>(useReplBridge hook)
+
+    Note over BRIDGE,SRV: ══ PHASE 1: Environment Registration ══
+
+    BRIDGE->>+SRV: POST /v1/environments/bridge<br/>{oauth_token}
+    SRV-->>-BRIDGE: {environment_id, environment_secret}
+    BRIDGE->>BRIDGE: Save bridge pointer<br/>(~/.claude/bridge-pointer-{dir}.json)
+
+    BRIDGE->>+SRV: POST /v1/code/sessions<br/>{oauth_token}
+    SRV-->>-BRIDGE: {session.id} (cse_* or session_*)
+
+    Note over BRIDGE,SRV: ══ PHASE 2: Work Polling ══
+
+    loop Poll for work (exponential backoff, 2s→120s)
+        BRIDGE->>+SRV: GET /v1/environments/{id}/work<br/>{environmentSecret}
+        alt No work available
+            SRV-->>BRIDGE: 204 No Content
+            BRIDGE->>BRIDGE: Backoff sleep<br/>(capacityWake can interrupt)
+        else Work received
+            SRV-->>-BRIDGE: {workId, ingressToken (JWT),<br/>use_code_sessions: bool}
+        end
+    end
+
+    Note over BRIDGE,SRV: ══ PHASE 3: Transport Setup ══
+
+    alt v1 Protocol (use_code_sessions = false)
+        BRIDGE->>+SRV: WebSocket: ws://host/v1/session_ingress/ws/{sessionId}<br/>Bearer {oauthToken}
+        SRV-->>-BRIDGE: WebSocket connected
+        Note over BRIDGE,SRV: Outbound via HTTP POST<br/>Inbound via WebSocket
+    else v2 Protocol (use_code_sessions = true)
+        BRIDGE->>+SRV: POST /worker/register<br/>{JWT}
+        SRV-->>-BRIDGE: {worker_epoch}
+        BRIDGE->>+SRV: SSE: GET /worker/events/stream<br/>{JWT, initialSequenceNum}
+        SRV-->>-BRIDGE: SSE stream opened
+        Note over BRIDGE,SRV: Outbound via POST /worker/events<br/>Inbound via SSE stream
+    end
+
+    BRIDGE->>BRIDGE: FlushGate.start()<br/>(buffer new messages during flush)
+    BRIDGE->>SRV: writeBatch(initialMessages)<br/>(conversation history)
+    BRIDGE->>BRIDGE: FlushGate.end() → drain buffered
+    BRIDGE-->>REPL: onStateChange('connected')
+
+    Note over IDE,REPL: ══ PHASE 4: Bidirectional Message Flow ══
+
+    rect rgb(230, 245, 255)
+        Note over IDE,REPL: IDE → CLI (Inbound)
+        IDE->>SRV: User prompt from IDE
+        SRV->>BRIDGE: SDKMessage {type:'user', message, uuid}
+        BRIDGE->>BRIDGE: bridgeMessaging.ts:<br/>Parse → Dedup (BoundedUUIDSet) → Route
+        alt type = 'user'
+            BRIDGE->>REPL: onInboundMessage(prompt)<br/>→ enqueue as new user turn
+        else type = 'control_request'
+            Note over BRIDGE: Subtypes:<br/>initialize, set_model,<br/>set_permission_mode, interrupt
+            BRIDGE->>REPL: Execute control callback
+            REPL-->>BRIDGE: Control response
+            BRIDGE->>SRV: SDKControlResponse {request_id, response}
+        else type = 'control_response'
+            BRIDGE->>REPL: onPermissionResponse()<br/>(permission decision from server)
+        end
+    end
+
+    rect rgb(255, 245, 230)
+        Note over IDE,REPL: CLI → IDE (Outbound)
+        REPL->>BRIDGE: writeMessage(SDKMessage)<br/>{type:'assistant', content, uuid}
+        BRIDGE->>BRIDGE: Add uuid to recentPostedUUIDs<br/>(echo filtering)
+        alt v1 transport
+            BRIDGE->>SRV: HTTP POST /v1/session_ingress/{sessionId}<br/>{SDKMessage + session_id}
+        else v2 transport
+            BRIDGE->>SRV: POST /worker/events<br/>{SDKMessage batch via CCRClient}
+        end
+        SRV->>IDE: Forward to IDE/Web UI
+        SRV->>WEB: Forward to Web UI
+    end
+
+    Note over BRIDGE,SRV: ══ PHASE 5: Keep-Alive & Reconnection ══
+
+    loop Heartbeat (every 20s, v2 only)
+        BRIDGE->>SRV: POST /worker/heartbeat<br/>{JWT}
+        alt 200 OK
+            SRV-->>BRIDGE: Lease extended (300s TTL)
+        else 401/403 (JWT expired)
+            SRV-->>BRIDGE: Auth error
+            BRIDGE->>BRIDGE: onHeartbeatFatal()<br/>→ kill transport
+            BRIDGE->>BRIDGE: reconnectSession()
+        end
+    end
+
+    loop Work heartbeat (every 60s)
+        BRIDGE->>SRV: POST /v1/environments/{id}/heartbeat<br/>{workId}
+        SRV-->>BRIDGE: Lease extended
+    end
+
+    Note over BRIDGE,SRV: ══ Reconnection Strategies ══
+
+    alt Transport close (code ≠ 1000)
+        BRIDGE->>BRIDGE: handleTransportPermanentClose()
+        BRIDGE->>BRIDGE: Capture lastSequenceNum
+
+        alt Strategy 1: Reconnect-in-place
+            BRIDGE->>SRV: POST /v1/environments/bridge<br/>{reuseEnvironmentId}
+            SRV-->>BRIDGE: Same environment_id
+            BRIDGE->>SRV: POST /v1/bridge/reconnect<br/>{sessionId}
+            SRV-->>BRIDGE: Reconnected (preserve history)
+        else Strategy 2: Fresh session
+            BRIDGE->>SRV: POST /v1/sessions/{id}/archive
+            BRIDGE->>SRV: POST /v1/code/sessions (new)
+            SRV-->>BRIDGE: New session_id
+            BRIDGE->>BRIDGE: Reset seq=0, clear UUIDs
+            BRIDGE->>SRV: Re-flush initial messages
+        end
+    end
+
+    Note over BRIDGE,SRV: ══ PHASE 6: Teardown ══
+
+    REPL->>BRIDGE: Session ending
+    BRIDGE->>BRIDGE: Abort poll loop
+    BRIDGE->>SRV: writeMessage({type:'result'})<br/>(session archival signal)
+    BRIDGE->>SRV: transport.flush() → drain queue
+    BRIDGE->>SRV: POST /v1/environments/{id}/work/{workId}/stop
+    BRIDGE->>SRV: POST /v1/environments/{id}/deregister
+    BRIDGE->>BRIDGE: Clear bridge pointer file<br/>(unless perpetual mode)
+    BRIDGE-->>REPL: Bridge closed
+
+    Note over BRIDGE: ══ Crash Recovery ══
+    Note over BRIDGE: On restart: read bridge-pointer-{dir}.json<br/>→ Try reconnect-in-place with stored IDs<br/>→ Fall back to fresh session if TTL expired
