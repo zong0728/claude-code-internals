@@ -1,0 +1,57 @@
+graph TB
+    subgraph USER["User Interface"]
+        CLI["Terminal CLI<br/>Ink.js React renderer"]
+        IDE["IDE Extensions<br/>VS Code · JetBrains"]
+    end
+
+    subgraph CORE["Core Engine"]
+        QE["Query Engine<br/>Agentic turn loop<br/>Streaming · Error recovery"]
+        TOOLS["39 Tools<br/>File · Bash · Search<br/>Web · MCP · Agent"]
+        PERM["Permission System<br/>AST parsing · Auto-classifier<br/>Plan mode"]
+    end
+
+    subgraph INFRA["Infrastructure"]
+        BRIDGE["IDE Bridge<br/>WebSocket / SSE<br/>Dual protocol"]
+        TASKS["Task System<br/>Background agents<br/>Shell · Remote"]
+        MEM["Memory<br/>Persistent recall<br/>Sonnet selection"]
+    end
+
+    subgraph EXTEND["Extensibility"]
+        MCP["MCP Servers<br/>External tools"]
+        PLUGINS["Plugins & Skills<br/>Slash commands"]
+        COORD["Coordinator<br/>Multi-agent<br/>orchestration"]
+    end
+
+    subgraph HIDDEN["Hidden Features"]
+        BUDDY["BUDDY<br/>Virtual companion<br/>18 species · 5 rarities"]
+        KAIROS["KAIROS<br/>Proactive messaging<br/>Checkpoint comms"]
+    end
+
+    CLI --> QE
+    IDE --> BRIDGE
+    BRIDGE --> QE
+    QE --> TOOLS
+    TOOLS --> PERM
+    QE --> TASKS
+    QE --> MEM
+    TOOLS --> MCP
+    TOOLS --> PLUGINS
+    TASKS --> COORD
+    QE --> BUDDY
+    QE --> KAIROS
+
+    TOOLS -->|"Claude API"| API(("Anthropic<br/>Claude API"))
+
+    classDef user fill:#6366f1,stroke:#4f46e5,color:#fff,font-weight:bold
+    classDef core fill:#ef4444,stroke:#dc2626,color:#fff,font-weight:bold
+    classDef infra fill:#3b82f6,stroke:#2563eb,color:#fff,font-weight:bold
+    classDef extend fill:#f59e0b,stroke:#d97706,color:#fff,font-weight:bold
+    classDef hidden fill:#8b5cf6,stroke:#7c3aed,color:#fff,font-weight:bold
+    classDef api fill:#10b981,stroke:#059669,color:#fff,font-weight:bold
+
+    class CLI,IDE user
+    class QE,TOOLS,PERM core
+    class BRIDGE,TASKS,MEM infra
+    class MCP,PLUGINS,COORD extend
+    class BUDDY,KAIROS hidden
+    class API api

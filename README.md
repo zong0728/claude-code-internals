@@ -1,48 +1,77 @@
+<div align="center">
+
 # Claude Code Internals
+
+**A deep architecture analysis of Anthropic's AI coding CLI**
+
+Based on the source code leaked via npm source maps on March 31, 2026
 
 **[English](README.md)** | **[中文](README_zh.md)**
 
-Deep dive into Claude Code's architecture based on the [leaked source code](https://github.com/anthropics/claude-code) — tools system, query engine, IDE bridge, hidden features & more.
+---
 
-## Background
+`~1,900 files` · `~513,000 lines` · `39 tools` · `36 modules` · `85+ hooks` · `146+ components` · `100+ commands`
 
-On March 31, 2026, [Chaofan Shou discovered](https://x.com/shoucccc) that Anthropic's Claude Code CLI had its full source code exposed via source maps bundled in the npm package. The source maps — normally a development-only debugging aid — were accidentally included in the production build, allowing anyone to reconstruct the original TypeScript source (~1,900 files, ~513,000 lines of code).
+</div>
 
-This repo contains **only my own analysis and documentation** — no leaked source code is included.
+## Architecture Overview
 
-## Contents
+<div align="center">
+<img src="assets/architecture-simple.png" alt="Claude Code Architecture" width="100%">
+</div>
+
+## Query Engine Flow
+
+The core of Claude Code — an agentic turn loop with streaming tool execution, 4 context compaction strategies, and 7+ error recovery paths.
+
+<div align="center">
+<img src="assets/query-engine-simple.png" alt="Query Engine Flow" width="600">
+</div>
+
+## What's Inside
 
 ### Analysis
 
-| File | Description |
-|------|-------------|
-| [`analysis/tools-breakdown.md`](analysis/tools-breakdown.md) | Tool system classification — 39 tools, 10 categories, permission model |
-| [`analysis/hidden-features.md`](analysis/hidden-features.md) | Hidden features: BUDDY (deterministic companion) & KAIROS (proactive messaging) |
-| [`analysis/extra-modules.md`](analysis/extra-modules.md) | Supplementary modules: coordinator, tasks, memdir, moreright, etc. |
+| Document | What You'll Learn |
+|----------|-------------------|
+| [**Tool System Breakdown**](analysis/tools-breakdown.md) | 39 tools across 10 categories, multi-layer permission model (AST-parsed commands, auto-classifier, plan mode), fail-closed defaults |
+| [**Hidden Features**](analysis/hidden-features.md) | **BUDDY** — deterministic virtual companion (Mulberry32 PRNG, 18 species, 5 rarity tiers, 1% shiny) and **KAIROS** — proactive messaging with append-only logging |
+| [**Extra Modules**](analysis/extra-modules.md) | coordinator (multi-agent), tasks (background execution), memdir (persistent memory with Sonnet selection), **moreright** (mysterious internal-only stub) |
 
-### Diagrams (Mermaid)
+### Detailed Diagrams (Mermaid)
 
-| File | Description |
-|------|-------------|
-| [`diagrams/architecture-overview.mmd`](diagrams/architecture-overview.mmd) | High-level architecture — 36 modules, dependency graph |
-| [`diagrams/query-engine-flow.mmd`](diagrams/query-engine-flow.mmd) | Query engine sequence diagram — agentic turn loop |
-| [`diagrams/ide-bridge.mmd`](diagrams/ide-bridge.mmd) | IDE bridge protocol — v1/v2, reconnection, crash recovery |
+| Diagram | Description |
+|---------|-------------|
+| [Architecture (full detail)](diagrams/architecture-overview.mmd) | All 36 modules with dependency arrows, color-coded by layer |
+| [Query Engine (full detail)](diagrams/query-engine-flow.mmd) | Complete call chain: entry → streaming → tool execution → error recovery → loop |
+| [IDE Bridge Protocol](diagrams/ide-bridge.mmd) | v1 (WebSocket) / v2 (SSE) dual protocol, reconnection strategies, crash recovery |
 
 ### Articles
 
-| File | Description |
-|------|-------------|
-| [`docs/article-en.md`](docs/article-en.md) | English article (~1,800 words) — for GitHub / dev.to |
-| [`docs/article-zh.md`](docs/article-zh.md) | Chinese article (~2,300 words) — for Juejin / Zhihu |
+| Article | Audience |
+|---------|----------|
+| [**English article**](docs/article-en.md) (~1,800 words) | GitHub / dev.to — concise technical deep-dive |
+| [**Chinese article**](docs/article-zh.md) (~2,300 words) | Juejin / Zhihu — detailed with more background context |
 
 ## Key Findings
 
-- **39 tools** with a multi-layer permission system (AST-parsed commands, dynamic permission computation, auto-classifier)
-- **Query engine** with 7+ error recovery paths, streaming tool execution, and 4 context compaction strategies
-- **IDE bridge** supporting dual protocols (WebSocket/SSE), crash recovery, and bounded UUID deduplication
-- **BUDDY**: A deterministic virtual companion system using Mulberry32 PRNG — 18 species, 5 rarity tiers, 1% shiny chance
-- **KAIROS**: A proactive messaging system with append-only logging and checkpoint-based communication
-- **moreright/**: A mysterious 25-line stub hiding an internal-only Anthropic feature behind an always-false gate
+**Permission system** — More complex than the LLM orchestration itself. Bash commands are AST-parsed to detect destructive operations. WebFetch uses hostname allowlists. A lightweight classifier auto-approves safe operations. Plan mode requires explicit approval for every tool call.
+
+**Streaming tool execution** — `StreamingToolExecutor` runs concurrency-safe tools *while the LLM is still generating*, significantly reducing latency in multi-tool turns.
+
+**Context management** — Four compaction strategies (micro, auto, reactive, context collapse) plus tool result budgeting. Context window management is not a solved problem — it's a continuous engineering effort.
+
+**BUDDY** — A deterministic gacha system deriving unique ASCII companions from `userId` hash → Mulberry32 PRNG seed. Only the "soul" (name, personality) is persisted; "bones" (species, rarity, stats) regenerate from hash, preventing config-editing exploits.
+
+**KAIROS** — Routes all visible output through `SendUserMessage` tool. Text outside tool calls goes to a low-visibility detail view. This enables proactive status updates and checkpoint-based communication.
+
+**moreright/** — A 25-line no-op stub that replaces an internal Anthropic feature. Gated by `"external" === 'ant'` (always false). The `onBeforeQuery` / `onTurnComplete` interface reveals where internal tooling hooks into the main loop.
+
+## Background
+
+On March 31, 2026, [Chaofan Shou](https://x.com/shoucccc) discovered that Anthropic's Claude Code CLI had its full source code exposed via source maps bundled in the npm package. Source maps — normally a development-only debugging aid — were accidentally included in the production build, allowing anyone to reconstruct the original TypeScript source.
+
+This repo contains **only original analysis and documentation** — no leaked source code is included.
 
 ## License
 

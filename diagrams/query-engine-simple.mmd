@@ -1,0 +1,32 @@
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant QE as Query Engine
+    participant API as Claude API
+    participant T as Tools (39)
+
+    U->>QE: Message
+    QE->>QE: Context compaction<br/>(4 strategies)
+
+    loop Agentic Turn Loop
+        QE->>API: Stream request
+        API-->>QE: Tokens + tool_use blocks
+
+        par Streaming execution
+            QE->>T: Run concurrent-safe tools
+            T-->>QE: Results
+        end
+
+        QE->>T: Run remaining tools<br/>(serial for writes)
+        T-->>QE: Results
+
+        alt Error recovery
+            QE->>QE: Prompt too long → compact
+            QE->>QE: Max tokens → escalate
+            QE->>QE: Fallback → switch model
+        end
+
+        QE->>QE: Memory + skill attachments
+    end
+
+    QE-->>U: Final response
