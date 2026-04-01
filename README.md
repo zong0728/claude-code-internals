@@ -16,17 +16,105 @@ Based on the source code leaked via npm source maps on March 31, 2026
 
 ## Architecture Overview
 
-<div align="center">
-<img src="assets/architecture-simple.png" alt="Claude Code Architecture" width="100%">
-</div>
+```mermaid
+graph TB
+    subgraph USER["🖥 User Interface"]
+        CLI["Terminal CLI\nInk.js React renderer"]
+        IDE["IDE Extensions\nVS Code · JetBrains"]
+    end
+
+    subgraph CORE["⚙️ Core Engine"]
+        QE["Query Engine\nAgentic turn loop\nStreaming · Error recovery"]
+        TOOLS["39 Tools\nFile · Bash · Search\nWeb · MCP · Agent"]
+        PERM["Permission System\nAST parsing · Auto-classifier\nPlan mode"]
+    end
+
+    subgraph INFRA["🏗 Infrastructure"]
+        BRIDGE["IDE Bridge\nWebSocket / SSE\nDual protocol"]
+        TASKS["Task System\nBackground agents\nShell · Remote"]
+        MEM["Memory\nPersistent recall\nSonnet selection"]
+    end
+
+    subgraph EXTEND["🧩 Extensibility"]
+        MCP["MCP Servers\nExternal tools"]
+        PLUGINS["Plugins & Skills\nSlash commands"]
+        COORD["Coordinator\nMulti-agent\norchestration"]
+    end
+
+    subgraph HIDDEN["🔮 Hidden Features"]
+        BUDDY["BUDDY\nVirtual companion\n18 species · 5 rarities"]
+        KAIROS["KAIROS\nProactive messaging\nCheckpoint comms"]
+    end
+
+    CLI --> QE
+    IDE --> BRIDGE
+    BRIDGE --> QE
+    QE --> TOOLS
+    TOOLS --> PERM
+    QE --> TASKS
+    QE --> MEM
+    TOOLS --> MCP
+    TOOLS --> PLUGINS
+    TASKS --> COORD
+    QE -.-> BUDDY
+    QE -.-> KAIROS
+
+    TOOLS -->|"Claude API"| API(("Anthropic\nClaude API"))
+
+    style CLI fill:#6366f1,stroke:#4f46e5,color:#fff
+    style IDE fill:#6366f1,stroke:#4f46e5,color:#fff
+    style QE fill:#ef4444,stroke:#dc2626,color:#fff
+    style TOOLS fill:#ef4444,stroke:#dc2626,color:#fff
+    style PERM fill:#ef4444,stroke:#dc2626,color:#fff
+    style BRIDGE fill:#3b82f6,stroke:#2563eb,color:#fff
+    style TASKS fill:#3b82f6,stroke:#2563eb,color:#fff
+    style MEM fill:#3b82f6,stroke:#2563eb,color:#fff
+    style MCP fill:#f59e0b,stroke:#d97706,color:#fff
+    style PLUGINS fill:#f59e0b,stroke:#d97706,color:#fff
+    style COORD fill:#f59e0b,stroke:#d97706,color:#fff
+    style BUDDY fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style KAIROS fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style API fill:#10b981,stroke:#059669,color:#fff
+```
 
 ## Query Engine Flow
 
 The core of Claude Code — an agentic turn loop with streaming tool execution, 4 context compaction strategies, and 7+ error recovery paths.
 
-<div align="center">
-<img src="assets/query-engine-simple.png" alt="Query Engine Flow" width="600">
-</div>
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant QE as Query Engine
+    participant API as Claude API
+    participant T as Tools (39)
+
+    U->>QE: Message
+    QE->>QE: Context compaction (4 strategies)
+
+    loop Agentic Turn Loop
+        QE->>API: Stream request
+        API-->>QE: Tokens + tool_use blocks
+
+        par Streaming execution
+            QE->>T: Run concurrent-safe tools
+            T-->>QE: Results
+        end
+
+        QE->>T: Run remaining tools (serial for writes)
+        T-->>QE: Results
+
+        alt Error recovery
+            QE->>QE: Prompt too long → compact
+            QE->>QE: Max tokens → escalate
+            QE->>QE: Fallback → switch model
+        end
+
+        QE->>QE: Memory + skill attachments
+    end
+
+    QE-->>U: Final response
+```
 
 ## What's Inside
 

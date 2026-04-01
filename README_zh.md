@@ -16,17 +16,105 @@
 
 ## 架构总览
 
-<div align="center">
-<img src="assets/architecture-simple.png" alt="Claude Code 架构图" width="100%">
-</div>
+```mermaid
+graph TB
+    subgraph USER["🖥 用户界面"]
+        CLI["终端 CLI\nInk.js React 渲染器"]
+        IDE["IDE 扩展\nVS Code · JetBrains"]
+    end
+
+    subgraph CORE["⚙️ 核心引擎"]
+        QE["Query Engine\nAgent 式多轮循环\n流式传输 · 错误恢复"]
+        TOOLS["39 个工具\n文件 · Bash · 搜索\nWeb · MCP · Agent"]
+        PERM["权限系统\nAST 解析 · 自动分类器\n计划模式"]
+    end
+
+    subgraph INFRA["🏗 基础设施"]
+        BRIDGE["IDE 桥接\nWebSocket / SSE\n双协议"]
+        TASKS["任务系统\n后台 Agent\nShell · 远程"]
+        MEM["记忆系统\n持久化召回\nSonnet 选择"]
+    end
+
+    subgraph EXTEND["🧩 扩展体系"]
+        MCP["MCP 服务器\n外部工具"]
+        PLUGINS["插件 & 技能\n斜杠命令"]
+        COORD["协调器\n多 Agent\n编排"]
+    end
+
+    subgraph HIDDEN["🔮 隐藏功能"]
+        BUDDY["BUDDY\n虚拟宠物\n18 物种 · 5 稀有度"]
+        KAIROS["KAIROS\n主动消息\n检查点通信"]
+    end
+
+    CLI --> QE
+    IDE --> BRIDGE
+    BRIDGE --> QE
+    QE --> TOOLS
+    TOOLS --> PERM
+    QE --> TASKS
+    QE --> MEM
+    TOOLS --> MCP
+    TOOLS --> PLUGINS
+    TASKS --> COORD
+    QE -.-> BUDDY
+    QE -.-> KAIROS
+
+    TOOLS -->|"Claude API"| API(("Anthropic\nClaude API"))
+
+    style CLI fill:#6366f1,stroke:#4f46e5,color:#fff
+    style IDE fill:#6366f1,stroke:#4f46e5,color:#fff
+    style QE fill:#ef4444,stroke:#dc2626,color:#fff
+    style TOOLS fill:#ef4444,stroke:#dc2626,color:#fff
+    style PERM fill:#ef4444,stroke:#dc2626,color:#fff
+    style BRIDGE fill:#3b82f6,stroke:#2563eb,color:#fff
+    style TASKS fill:#3b82f6,stroke:#2563eb,color:#fff
+    style MEM fill:#3b82f6,stroke:#2563eb,color:#fff
+    style MCP fill:#f59e0b,stroke:#d97706,color:#fff
+    style PLUGINS fill:#f59e0b,stroke:#d97706,color:#fff
+    style COORD fill:#f59e0b,stroke:#d97706,color:#fff
+    style BUDDY fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style KAIROS fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style API fill:#10b981,stroke:#059669,color:#fff
+```
 
 ## Query Engine 流程
 
-Claude Code 的核心 —— Agent 式多轮循环，支持流式工具执行、4 种上下文压缩策略、7+ 种错误恢复路径。
+Claude Code 的核心 — Agent 式多轮循环，支持流式工具执行、4 种上下文压缩策略、7+ 种错误恢复路径。
 
-<div align="center">
-<img src="assets/query-engine-simple.png" alt="Query Engine 流程图" width="600">
-</div>
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant QE as Query Engine
+    participant API as Claude API
+    participant T as 工具 (39)
+
+    U->>QE: 消息
+    QE->>QE: 上下文压缩（4 种策略）
+
+    loop Agent 式多轮循环
+        QE->>API: 流式请求
+        API-->>QE: Tokens + tool_use 块
+
+        par 流式执行
+            QE->>T: 执行并发安全工具
+            T-->>QE: 结果
+        end
+
+        QE->>T: 执行剩余工具（写操作串行）
+        T-->>QE: 结果
+
+        alt 错误恢复
+            QE->>QE: Prompt 过长 → 压缩
+            QE->>QE: Token 超限 → 升级
+            QE->>QE: 回退 → 切换模型
+        end
+
+        QE->>QE: 记忆 + 技能附件
+    end
+
+    QE-->>U: 最终响应
+```
 
 ## 内容导航
 
